@@ -1,6 +1,6 @@
 from flask import Flask
 import feedparser
-from flask impor request
+from flask import request
 
 app = Flask(__name__)
 
