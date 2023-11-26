@@ -1,247 +1,169 @@
-import botpy
-from botpy import logging, BotAPI
-
-from botpy.ext.command_util import Commands
-from botpy.message import Message
-from botpy.ext.cog_yaml import read
+import datetime
+from flask import Flask, request, jsonify
 import sqlite3
-import random
-from datetime import datetime
+import pandas as pd
+from datetime import timedelta
+app = Flask(__name__)
+DB_NAME = 'mylife.db'
 
-_log = logging.get_logger()
+def create_connection():
+    conn = sqlite3.connect(DB_NAME)
+    return conn
 
-
-@Commands("签到")
-async def sign(api: BotAPI, message: Message, params=None):
-    _log.info(params)
-    # 第一种用reply发送消息
-    user_id = message.author.id
-    # 连接到SQLite数据库
-    conn = sqlite3.connect('./data/score.db')
+@app.route('/worklife', methods=['GET'])
+def get_worklife():
+    comment = request.args.get("type")
+    conn = create_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM worklife WHERE sessionType=?", (comment,))
+    rows = cursor.fetchall()
+    conn.close()
+    return jsonify(rows)
+@app.route('/todayf', methods=['GET'])
+def get_todayf():
+   # 连接数据库
+    conn = sqlite3.connect('mylife.db')
     cursor = conn.cursor()
 
-    # 获取当前日期
-    today = datetime.now().date()
+    # 获取当天数据
+    current_date = datetime.datetime.now().strftime('%Y-%m-%d')
+    start_date = current_date + ' 00:00:00'
+    end_date = current_date + ' 23:59:59'
+    query = "SELECT * FROM worklife WHERE datetime >= ? AND datetime <= ? ORDER BY datetime"
+    cursor.execute(query, (start_date, end_date))
+    rows = cursor.fetchall()
 
-    # 查询用户表获取用户信息
-    cursor.execute("SELECT * FROM users WHERE id=?", (user_id,))
-    user = cursor.fetchone()
-
-    if user:
-        # 查询用户的签到记录
-        cursor.execute("SELECT * FROM sign_ins WHERE user_id=? AND date=?", (user_id, today))
-        sign_in_record = cursor.fetchone()
-
-        if sign_in_record:
-            print("今天已经签到过了！")
-            cursor.close()
-            conn.close()
-            await message.reply(content=f"今天已经签到过了！")
-
-        else:
-            # 随机生成积分
-            points = random.randint(1, 10)
-            print
-            # 更新用户表中的积分
-            new_points = user[2] + points
-            cursor.execute("UPDATE users SET points=? WHERE id=?", (new_points, user_id))
-
-            # 插入签到记录
-            cursor.execute("INSERT INTO sign_ins (user_id, date, points) VALUES (?, ?, ?)", (user_id, today, points))
-            conn.commit()
-
-            print(f"签到成功！获得{points}积分，当前总积分为{new_points}")
-            # 关闭数据库连接
-            cursor.close()
-            conn.close()
-            await message.reply(content=f"签到成功！获得{points}积分，当前总积分为{new_points}")
-    else:
-        print("用户不存在！")
-
-
-@Commands("商城")
-async def shop(api: BotAPI, message: Message, params=None):
-    _log.info(params)
-    # 第一种用reply发送消息
-    user_id = message.author.id
+    conn.close()
+    return jsonify(rows)
+@app.route('/today', methods=['GET'])
+def get_today():
     # 连接到SQLite数据库
-    conn = sqlite3.connect('./data/score.db')
+    conn = sqlite3.connect('mylife.db')
     cursor = conn.cursor()
-    # 查询所有商品信息
-    cursor.execute("SELECT * FROM products")
-    products = cursor.fetchall()
 
-    contents = ''
-    contents += "商品信息：\n"
-    for product in products:
-        contents += "名称：{}\n价格：{}\n描述：{}\n库存：{}\n**********\n".format(product[1], product[2], product[4],
-                                                                              product[5])
-    contents += "回复 ‘/兑换+物品名称’进行兑换"
-    await message.reply(content=contents)
+    # 获取当天日期
+    today = datetime.datetime.now().date()
+    # print(today)
+    # 初始化各个任务在每个小时的累计sessionTime
+    hourly_task_time = {task: [0] * 1 for task in set([row[4] for row in cursor.execute("SELECT * FROM worklife")])}
+    print(hourly_task_time)
+    # 查询当天每小时各任务的sessionTime
+    start_time = datetime.datetime(today.year, today.month, today.day, 0, 0, 0)  # 创建ISO格式的起始时间
+    end_time = start_time + timedelta(hours=23)
+    print(start_time, end_time)
+        # 查询当天每小时各任务的sessionTime
+    cursor.execute("SELECT sessionType, sessionTime FROM worklife WHERE datetime >= ? AND datetime < ?", (start_time, end_time))
+    result = cursor.fetchall()
+    print(result)
+    # 处理查询结果
+    for task, session_time in result:
+            hourly_task_time[task][0] += session_time
+
+    # 将每个任务在每个小时的累计sessionTime转换为字典形式
+    hourly_task_time_dict = {task: hourly_task_time[task] for task in hourly_task_time}
+
+    # 打印每个任务在每个小时的累计sessionTime
+    for task, task_time_list in hourly_task_time_dict.items():
+        print(f"任务 {task} 在每个小时的累计sessionTime为：{task_time_list}")
 
     # 关闭数据库连接
-    cursor.close()
+    # print(task_time_list)
     conn.close()
-
-
-@Commands("我的物品")
-async def my_bags(api: BotAPI, message: Message, params=None):
-    _log.info(params)
-    # 第一种用reply发送消息
-    user_id = message.author.id
-    # 连接到SQLite数据库
-    conn = sqlite3.connect('./data/score.db')
+    return jsonify(hourly_task_time_dict)
+@app.route('/max', methods=['GET'])
+#查询worklife表中sessionTime的最大值
+def get_max():
+    conn = create_connection()
     cursor = conn.cursor()
-    try:
+    cursor.execute("SELECT MAX(sessionTime) FROM worklife" )
+    rows = cursor.fetchall()
+    conn.close()
+    return jsonify(rows)
+# from datetime import datetime, timedelta
+import datetime
 
-        cursor.execute("SELECT * FROM warehouse WHERE user_id = ?", (user_id,))
-        purchase = cursor.fetchall()
-
-        if purchase:
-            contents = ''
-            contents += message.author.username+"的物品信息：\n"
-            for product in purchase:
-                contents += "名称：{}\n库存：{}\n**********\n".format(product[2], product[3])
-            contents += "回复 ‘/使用+物品名称’进行使用"
-            await message.reply(content=contents)
-        else:
-            await message.reply(content='你还没有物品！')
-
-    except Exception as e:
-        await message.reply(content="查询失败")
-        print("查询失败:", str(e))
-
-    finally:
-        # 关闭数据库连接
-        cursor.close()
-        conn.close()
-
-
-@Commands("兑换")
-async def buy(api: BotAPI, message: Message, params=None):
-    _log.info(params)
-    # 第一种用reply发送消息
-    user_id = message.author.id
-    # 连接到SQLite数据库
-    conn = sqlite3.connect('./data/score.db')
+@app.route('/month', methods=['GET'])
+#查询worklife表中sessionTime的最大值
+def get_month():
+    conn = create_connection()
     cursor = conn.cursor()
-    product_name = message.content.split(' ')[-1]
-    print(product_name)
-    try:
-        # 查询用户是否存在
-        cursor.execute("SELECT * FROM users WHERE id = ?", (user_id,))
-        user = cursor.fetchone()
-        if not user:
-            await message.reply(content="用户不存在")
-            return
-        # 查询商品是否存在
-        cursor.execute("SELECT * FROM products WHERE name = ?", (product_name,))
-        product = cursor.fetchone()
-        if not product:
-            await message.reply(content="物品不存在")
-            return
 
-        # 检查商品库存
-        if product[5] == 0:
-            await message.reply(content="商品库存不足")
-            return
+    # 获取当月的起始日期和结束日期
+    today = datetime.datetime.now()
+    start_date = today.replace(day=1).replace(hour=0, minute=0, second=0, microsecond=0)
+    end_date = today.replace(day=1, month=today.month+1)
 
-            # 查询用户是否已购买过该商品
-        cursor.execute("SELECT * FROM warehouse WHERE user_id = ? AND product_id = ?", (user_id, product[0]))
-        purchase = cursor.fetchone()
+    # 查询当月的数据
+    query = f"SELECT datetime, sessionType, sessionTime FROM worklife WHERE datetime >= '{start_date.isoformat()}' AND datetime < '{end_date.isoformat()}'"
+    cursor.execute(query)
+    rows = cursor.fetchall()
 
-        if purchase:
-            # 更新购买记录
-            new_quantity = purchase[3] + 1
-            cursor.execute("UPDATE warehouse SET quantity = ? WHERE id = ?", (new_quantity, purchase[0]))
-        else:
-            # 插入购买记录到warehouse表
-            quantity = 1  # 购买数量，这里假设为1
-            cursor.execute("INSERT INTO warehouse (user_id, product_id, quantity) VALUES (?, ?, ?)",
-                           (user_id, product_name, quantity))
+    # 计算每天各类 sessionType 的 sessionTime 总和
+    data = {}
+    for row in rows:
+        date_str, session_type, session_time = row
+        date = date_str.split('T')[0]
+        # date = date.date()
+        if date not in data:
+            data[date] = {}
+        if session_type not in data[date]:
+            data[date][session_type] = 0
+        data[date][session_type] += session_time
 
-        # 更新用户积分
-        new_points = user[2] - product[2]
-        cursor.execute("UPDATE users SET points = ? WHERE id = ?", (new_points, user_id))
+    # 按照指定格式返回 pieSeries
+    pieSeries = []
+    for date, sessions in data.items():
+        pieSeries.append({
+            'type': 'pie',
+            'id': f'pie-{date}',
+            'center': date,
+            'radius': 60,
+            'coordinateSystem': 'calendar',
+            'label': {
+                'formatter': '{c}',
+                'position': 'inside',
+                'fontsize':20
+            },
+            'data': [
+                {'name': '工作', 'value': sessions.get('工作', 0)},
+                {'name': '学习', 'value': sessions.get('学习', 0)},
+                {'name': '吃饭', 'value': sessions.get('吃饭', 0)},
+                {'name': '娱乐', 'value': sessions.get('娱乐', 0)},
+                {'name': '睡觉', 'value': sessions.get('睡觉', 0)}
+            ]
+        })
 
-        # 更新商品库存
-        new_stock = product[5] - 1
-        cursor.execute("UPDATE products SET quantity = ? WHERE name = ?", (new_stock, product_name))
-
-        conn.commit()
-        await message.reply(content="兑换成功")
-        print("兑换成功")
-
-    except Exception as e:
-        await message.reply(content="兑换失败")
-        print("兑换失败:", str(e))
-
-    finally:
-        # 关闭数据库连接
-        cursor.close()
-        conn.close()
-@Commands("使用")
-async def use(api: BotAPI, message: Message, params=None):
-    _log.info(params)
-    # 第一种用reply发送消息
-    user_id = message.author.id
-    # 连接到SQLite数据库
-    conn = sqlite3.connect('./data/score.db')
+    # 关闭数据库连接
+    conn.close()
+    return jsonify(pieSeries)
+@app.route('/worklife', methods=['POST'])
+def add_worklife():
+    data = request.get_json()
+    conn = create_connection()
     cursor = conn.cursor()
-    product_name = message.content.split(' ')[-1]
-    print(product_name)
-    try:
-        # 查询用户是否存在
-        cursor.execute("SELECT * FROM users WHERE id = ?", (user_id,))
-        user = cursor.fetchone()
-        if not user:
-            await message.reply(content="用户不存在")
-            return
-        # 查询商品是否存在
-        cursor.execute("SELECT * FROM warehouse WHERE product_id = ? and user_id = ?", (product_name,user_id))
-        purchase = cursor.fetchone()
-        if not purchase:
-            await message.reply(content="物品不存在")
-            return
+    cursor.execute("INSERT INTO worklife (datetime, sessionTime, sessionTask, sessionType) VALUES (?, ?, ?, ?)", (datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')[:-3], data['sessionTime'], data['sessionTask'], data['sessionType']))
+    conn.commit()
+    conn.close()
+    return jsonify({"message": "Record added successfully"})
 
-        # 检查商品库存
-        if purchase[3] == 0:
-            await message.reply(content="商品库存不足")
-            return
+@app.route('/worklife/<int:worklife_id>', methods=['PUT'])
+def update_worklife(worklife_id):
+    data = request.get_json()
+    conn = create_connection()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE worklife SET datetime=?, sessionTime=?, sessionTask=? WHERE id=?", (data['datetime'], data['sessionTime'], data['sessionTask'], worklife_id))
+    conn.commit()
+    conn.close()
+    return jsonify({"message": "Record updated successfully"})
 
-        if purchase:
-            # 更新购买记录
-            new_quantity = purchase[3] - 1
-            cursor.execute("UPDATE warehouse SET quantity = ? WHERE id = ?", (new_quantity, purchase[0]))
+@app.route('/worklife/<int:worklife_id>', methods=['DELETE'])
+def delete_worklife(worklife_id):
+    conn = create_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM worklife WHERE id=?", (worklife_id,))
+    conn.commit()
+    conn.close()
+    return jsonify({"message": "Record deleted successfully"})
 
-
-        conn.commit()
-        await message.reply(content="使用成功")
-        print("使用成功")
-
-    except Exception as e:
-        await message.reply(content="使用失败")
-        print("使用失败:", str(e))
-
-    finally:
-        # 关闭数据库连接
-        cursor.close()
-        conn.close()
-
-class MyClient(botpy.Client):
-    async def on_at_message_create(self, message: Message):
-        handlers = [
-            sign,
-            shop,
-            buy,
-            my_bags,
-            use
-        ]
-        for handler in handlers:
-            if await handler(api=self.api, message=message):
-                return
-
-
-intents = botpy.Intents(public_guild_messages=True)
-client = MyClient(intents=intents)
-client.run(appid='102004094', token='PEnXUOglUA8EAn6dpIWAMRw7vGEu9LfX')
+if __name__ == '__main__':
+    app.run(debug=True, port=8000)
