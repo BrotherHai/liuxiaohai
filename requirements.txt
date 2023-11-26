@@ -1,1 +1,2 @@
-qq-botpy
+sqlite3
+pandas
