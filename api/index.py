@@ -4,10 +4,17 @@ import sqlite3
 import pandas as pd
 from datetime import timedelta
 app = Flask(__name__)
-DB_NAME = 'mylife.db'
+import psycopg2
 
 def create_connection():
-    conn = sqlite3.connect(DB_NAME)
+    POSTGRES_URL="postgres://default:bXsPRSU6eJz1@ep-twilight-recipe-40217429-pooler.ap-southeast-1.postgres.vercel-storage.com:5432/verceldb"
+    POSTGRES_PRISMA_URL="postgres://default:bXsPRSU6eJz1@ep-twilight-recipe-40217429-pooler.ap-southeast-1.postgres.vercel-storage.com:5432/verceldb?pgbouncer=true&connect_timeout=15"
+    POSTGRES_URL_NON_POOLING="postgres://default:bXsPRSU6eJz1@ep-twilight-recipe-40217429.ap-southeast-1.postgres.vercel-storage.com:5432/verceldb"
+    POSTGRES_USER="default"
+    POSTGRES_HOST="ep-twilight-recipe-40217429-pooler.ap-southeast-1.postgres.vercel-storage.com"
+    POSTGRES_PASSWORD="bXsPRSU6eJz1"
+    POSTGRES_DATABASE="verceldb"
+    conn = psycopg2.connect(database=POSTGRES_DATABASE, user=POSTGRES_USER, password=POSTGRES_PASSWORD, host=POSTGRES_HOST, port="5432")
     return conn
 
 @app.route('/worklife', methods=['GET'])
@@ -22,7 +29,7 @@ def get_worklife():
 @app.route('/todayf', methods=['GET'])
 def get_todayf():
    # 连接数据库
-    conn = sqlite3.connect('mylife.db')
+    conn = create_connection()
     cursor = conn.cursor()
 
     # 获取当天数据
@@ -38,7 +45,7 @@ def get_todayf():
 @app.route('/today', methods=['GET'])
 def get_today():
     # 连接到SQLite数据库
-    conn = sqlite3.connect('mylife.db')
+    conn = create_connection()
     cursor = conn.cursor()
 
     # 获取当天日期
